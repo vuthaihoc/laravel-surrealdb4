@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+  bootstrap="vendor/autoload.php"
+  cacheDirectory=".phpunit.cache"
+  failOnRisky="true"
+  failOnWarning="true"
+  defaultTestSuite="Unit,Feature"
+>
+  <testsuites>
+    <testsuite name="Unit">
+      <directory>tests/Unit</directory>
+    </testsuite>
+    <testsuite name="Feature">
+      <directory>tests/Feature</directory>
+    </testsuite>
+    <!-- Known SurrealDB issues, asserting PostgreSQL behaviour: expected to fail until SurrealDB fixes them. -->
+    <testsuite name="KnownIssues">
+      <directory>tests/KnownIssues</directory>
+    </testsuite>
+  </testsuites>
+  <php>
+    <!-- Environment variables of the same name take precedence (e.g. to test SurrealDB Cloud). -->
+    <env name="SURREALDB_HOST" value="127.0.0.1"/>
+    <env name="SURREALDB_PORT" value="5436"/>
+    <env name="SURREALDB_NAMESPACE" value="main"/>
+    <env name="SURREALDB_DATABASE" value="laravel_test"/>
+    <env name="SURREALDB_USERNAME" value="root"/>
+    <env name="SURREALDB_PASSWORD" value="root"/>
+    <env name="SURREALDB_SSLMODE" value="disable"/>
+  </php>
+  <source>
+    <include>
+      <directory>./src</directory>
+    </include>
+  </source>
+</phpunit>

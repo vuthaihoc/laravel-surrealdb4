@@ -1,0 +1,14 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 8
+    paths:
+        - src
+    reportUnmatchedIgnoredErrors: true
+    ignoreErrors:
+        # A number default is written as given ('1.50'), checked by is_numeric(), not a literal string.
+        -
+            identifier: argument.type
+            message: '#Expression constructor expects .*numeric-string given#'
+            path: src/Schema/Grammar.php
