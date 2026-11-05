@@ -11,6 +11,15 @@ use LaravelSurrealDb\Exceptions\UnsupportedFeatureException;
 class Grammar extends PostgresGrammar
 {
     /**
+     * Migrations run outside a transaction: SurrealDB Cloud does not enforce
+     * primary keys and unique constraints created inside one, and a statement
+     * outside a transaction is run again when it meets a conflict.
+     *
+     * @var bool
+     */
+    protected $transactions = false;
+
+    /**
      * SurrealDB checks a column default against the column type: a boolean
      * default is `true`/`false`, not PostgreSQL's `'1'`/`'0'`.
      *

@@ -83,8 +83,7 @@ class SurrealDbConnection extends PostgresConnection
     /**
      * A statement run outside a transaction is its own transaction: when
      * SurrealDB aborts it on a conflict nothing was written, so it is run
-     * again, up to `conflict_retries` times (default 3), after 0.1 s, 0.2 s,
-     * 0.4 s... (at most 1 s).
+     * again (see retryAfterConflict()).
      *
      * @param  string  $query
      * @param  array<array-key, mixed>  $bindings
@@ -95,21 +94,59 @@ class SurrealDbConnection extends PostgresConnection
             return parent::handleQueryException($e, $query, $bindings, $callback);
         }
 
+        return $this->retryAfterConflict($e, fn () => $this->runQueryCallback($query, $bindings, $callback));
+    }
+
+    /**
+     * Run the callback, and again when it fails with a transaction conflict
+     * outside a transaction (see retryAfterConflict()). Inside one, the
+     * conflict is the enclosing transaction's to handle.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $callback
+     * @return TResult
+     */
+    public function retryOnConflict(Closure $callback): mixed
+    {
+        try {
+            return $callback();
+        } catch (Throwable $e) {
+            if ($this->transactions > 0 || ! $this->causedByConcurrencyError($e)) {
+                throw $e;
+            }
+
+            return $this->retryAfterConflict($e, $callback);
+        }
+    }
+
+    /**
+     * Run the callback again, up to `conflict_retries` times (default 3),
+     * after 0.1 s, 0.2 s, 0.4 s... (at most 1 s): a SurrealDB conflict can
+     * last a second, longer than immediate retries take.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $callback
+     * @return TResult
+     */
+    protected function retryAfterConflict(Throwable $conflict, Closure $callback): mixed
+    {
         for ($attempt = 1; $attempt <= $this->conflictRetries(); $attempt++) {
             usleep(min(1_000_000, 50_000 * 2 ** $attempt));
 
             try {
-                return $this->runQueryCallback($query, $bindings, $callback);
-            } catch (QueryException $retry) {
+                return $callback();
+            } catch (Throwable $retry) {
                 if (! $this->causedByConcurrencyError($retry)) {
                     throw $retry;
                 }
 
-                $e = $retry;
+                $conflict = $retry;
             }
         }
 
-        throw $e;
+        throw $conflict;
     }
 
     protected function getDefaultQueryGrammar()

@@ -9,8 +9,8 @@ use Throwable;
  * groups fail on SurrealDB 4.0.0; the last one fails only on SurrealDB Cloud
  * (a 4.0 nightly) and passes on 4.0.0.
  *
- * Last verified 2026-11-04: SurrealDB 4.0.0, 22 failures and 3 passes (the
- * Cloud group); SurrealDB Cloud, 25 failures.
+ * Last verified 2026-11-04: SurrealDB 4.0.0, 22 failures and 6 passes (the
+ * Cloud group); SurrealDB Cloud, 28 failures.
  */
 class KnownIssuesTest extends TestCase
 {
@@ -394,6 +394,82 @@ class KnownIssuesTest extends TestCase
         );
 
         $this->assertSame([['n' => '1', 'l' => '[1,2]', 'len' => 2]], $rows);
+    }
+
+    /**
+     * Cloud: a primary key or unique constraint created inside a transaction
+     * is listed in pg_index but not enforced. Laravel runs each migration in a
+     * transaction on PostgreSQL. Driver workaround: Schema\Grammar runs
+     * migrations outside a transaction.
+     */
+    public function test_keys_created_in_a_transaction(): void
+    {
+        $table = $this->table('tx_keys');
+        $pdo = self::connect();
+
+        try {
+            $pdo->beginTransaction();
+            $pdo->exec('create table '.$table.' ("key" varchar(255) not null, "email" varchar(255) not null)');
+            $pdo->exec('alter table '.$table.' add primary key ("key")');
+            $pdo->exec('alter table '.$table.' add constraint "'.$this->prefix.'tx_unique" unique ("email")');
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $this->fail($e->getMessage());
+        }
+
+        $rows = $this->runSql(
+            'insert into '.$table.' ("key", "email") values (\'a\', \'a@x.io\')',
+            'insert into '.$table.' ("key", "email") values (\'a\', \'b@x.io\') on conflict do nothing',
+            'insert into '.$table.' ("key", "email") values (\'b\', \'a@x.io\') on conflict do nothing',
+            'select "key", "email" from '.$table,
+        );
+
+        $this->assertSame([['key' => 'a', 'email' => 'a@x.io']], $rows);
+    }
+
+    /**
+     * Cloud: UPDATE and DELETE comparing an indexed uuid column (a primary key
+     * or a unique column) with a value change no row; SELECT finds it, and an
+     * unindexed uuid column or `"id"::text = ?` works. Database notifications
+     * and models with `uuid('id')->primary()` cannot be updated or deleted.
+     * Not worked around: use `string('id', 36)` keys.
+     */
+    public function test_update_by_an_indexed_uuid_column(): void
+    {
+        $uuid = '7f0c8b0e-4b4a-4c1a-9b65-2f6b4b9f0e11';
+
+        $rows = $this->runSql(
+            'create table '.$this->table('uuid_pk').' ("id" uuid not null primary key, "v" integer not null)',
+            ['insert into '.$this->table('uuid_pk').' ("id", "v") values (?, 0)', [$uuid]],
+            ['update '.$this->table('uuid_pk').' set "v" = 1 where "id" = ?', [$uuid]],
+            'select "v" from '.$this->table('uuid_pk'),
+        );
+
+        $this->assertSame([['v' => 1]], $rows);
+    }
+
+    /**
+     * Cloud: the first serial value of a new table, or after `truncate ...
+     * restart identity`, taken inside a transaction makes it fail with a
+     * transaction conflict; outside a transaction it works, and so do later
+     * transactions. Laravel's own transactions (`Bus::batch()->dispatch()`)
+     * are not retried. Not worked around: `DB::transaction($callback, 2)`.
+     */
+    public function test_first_serial_value_inside_a_transaction(): void
+    {
+        $table = $this->table('serial_tx');
+        $pdo = self::connect();
+
+        try {
+            $pdo->exec('create table '.$table.' ("id" bigserial primary key, "a" integer)');
+            $pdo->beginTransaction();
+            $pdo->exec('insert into '.$table.' ("a") values (1)');
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $this->fail($e->getMessage());
+        }
+
+        $this->assertSame([['a' => 1]], $this->runSql('select "a" from '.$table));
     }
 
     /**

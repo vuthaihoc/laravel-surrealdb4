@@ -175,9 +175,13 @@ class Builder extends BaseBuilder
      */
     protected function transaction(Closure $callback): int
     {
-        $attempts = $this->connection instanceof SurrealDbConnection ? $this->connection->conflictRetries() + 1 : 1;
+        $connection = $this->connection;
 
-        return $this->connection->transaction($callback, $attempts);
+        if (! $connection instanceof SurrealDbConnection) {
+            return $connection->transaction($callback);
+        }
+
+        return $connection->retryOnConflict(fn () => $connection->transaction($callback));
     }
 
     /**

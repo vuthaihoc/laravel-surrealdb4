@@ -77,6 +77,38 @@ class ConflictRetryTest extends TestCase
         $this->assertSame(2, $calls);
     }
 
+    public function test_a_conflicted_callback_runs_again_outside_a_transaction(): void
+    {
+        $connection = $this->connection();
+        $calls = 0;
+
+        $result = $connection->retryOnConflict(function () use (&$calls) {
+            if (++$calls < 3) {
+                throw self::conflict();
+            }
+
+            return 'ok';
+        });
+
+        $this->assertSame('ok', $result);
+        $this->assertSame(3, $calls);
+
+        (fn () => $this->transactions = 1)->call($connection);
+        $calls = 0;
+
+        try {
+            $connection->retryOnConflict(function () use (&$calls) {
+                $calls++;
+
+                throw self::conflict();
+            });
+            $this->fail('The conflict was not reported.');
+        } catch (PDOException) {
+        }
+
+        $this->assertSame(1, $calls);
+    }
+
     public function test_other_errors_and_statements_in_a_transaction_are_not_retried(): void
     {
         $calls = 0;

@@ -99,6 +99,11 @@ class GrammarTest extends TestCase
         $this->assertSame(['a' => ['b' => [1, 9], 'c' => ['d' => 'x']], 'z' => ['y' => null]], $document);
     }
 
+    public function test_migrations_run_outside_transactions(): void
+    {
+        $this->assertFalse($this->connection->getSchemaGrammar()->supportsSchemaTransactions());
+    }
+
     public function test_boolean_defaults_and_enums(): void
     {
         $sql = $this->schemaSql('users', function (Blueprint $table) {

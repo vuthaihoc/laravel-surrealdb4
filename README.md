@@ -7,6 +7,8 @@ tables.
 > **Pre-release.** Tested on SurrealDB `4.0.0` (Docker) and on SurrealDB Cloud (a 4.0 nightly, November 2026).
 
 The driver is Laravel's `pgsql` driver with SurrealDB's differences worked around. The [limits](#limits) are listed below.
+Laravel's default tables and the drivers that use them are tested: the database cache (with locks), sessions,
+authentication, password resets, notifications, the queue, job batches and failed jobs.
 
 ## Installation
 
@@ -67,12 +69,16 @@ that conflicts with another one ("Transaction conflict ... This transaction can 
 - treats that error as a concurrency error, so `DB::transaction($callback, attempts: 3)` runs the callback again;
 - runs a statement outside a transaction again, up to `conflict_retries` times (default 3, with a growing pause from 0.1 s
   to 1 s): SurrealDB wrote nothing;
-- retries its own read-then-write transactions (see below) the same way.
+- retries its own read-then-write transactions (see below) the same way, after the same pauses.
+
+Migrations run outside a transaction, as on MySQL: SurrealDB Cloud does not enforce primary keys and unique constraints
+created inside one. A migration that fails halfway is not rolled back.
 
 ## What the driver changes
 
 | Laravel | On SurrealDB |
 |---|---|
+| migrations | run outside a transaction (see [Transactions](#transactions)) |
 | prepared statements | sent unnamed (`PDO::PGSQL_ATTR_DISABLE_PREPARES`): pdo_pgsql's `DEALLOCATE` would abort the transaction |
 | parameters in a nested query (`exists`, `whereHas()`, `in (select ...)`, a union branch, a subquery column) or in `HAVING` | SurrealDB reads them as text there, which matches only text columns: integers, floats and booleans are cast (`?::bigint`, `?::float8`), dates (`DateTimeInterface`) cast to `timestamp`, and date strings (`2026-01-02`, `2026-01-02 03:04:05`) inlined as literals |
 | `update()` / `delete()` with joins, a limit, `like`, or a subquery in `where` | the ids are selected, then rows are written by id, in chunks of 1000, in a transaction (SurrealDB refuses those statements) |
@@ -108,6 +114,12 @@ The Cloud build differs from 4.0.0 (see `tests/KnownIssues`, last group):
 - `->>` reads a JSON number, boolean, array or object as `false` (strings are right): `where('meta->count', 1)`,
   `whereJsonLength()` and selecting `meta->list` fail. Compare JSON strings, or read the whole column and decode it.
 - `insert ... select` into a foreign key column fails.
+- An update or delete comparing an indexed uuid column (`uuid('id')->primary()`) with a value changes no row: models
+  with such keys (`HasUuids`) and database notifications (`markAsRead()`) cannot be updated or deleted. Use
+  `string('id', 36)` keys.
+- The first id of a new table, or after `truncate()`, taken inside a transaction makes it fail with a transaction
+  conflict. Laravel does not retry its own transactions, so the first `Bus::batch()->dispatch()` after `migrate` can
+  fail; pass `attempts` to your own `DB::transaction()` calls.
 
 ## Testing
 
